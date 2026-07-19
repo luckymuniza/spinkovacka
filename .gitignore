@@ -1,0 +1,23 @@
+# ESP-IDF
+build/
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# KiCad
+*-backups/
+*.kicad_pcb-bak
+*.kicad_sch-bak
+fp-info-cache
+*.kicad_prl
+*.step
+*.dxf
+*.stp
+
+# CLion / JetBrains
+.idea/
+cmake-build-*/
+
+#DOC
+doc/
+
