@@ -13843,7 +13843,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "1u"
+		(property "Value" "100n"
 			(at 349.758 51.054 0)
 			(show_name no)
 			(do_not_autoplace no)
