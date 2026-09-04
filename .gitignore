@@ -10,9 +10,13 @@ dependencies.lock
 *.kicad_sch-bak
 fp-info-cache
 *.kicad_prl
+~*.lck
 *.step
 *.dxf
 *.stp
+
+# Local history
+.history/
 
 # CLion / JetBrains
 .idea/
