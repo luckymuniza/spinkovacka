@@ -268,6 +268,7 @@ static void motor_pwm_init(void)
     };
     ESP_ERROR_CHECK(ledc_channel_config(&ccfg));
     motor_brake();
+
 }
 
 
