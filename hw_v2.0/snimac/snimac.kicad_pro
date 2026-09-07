@@ -570,6 +570,7 @@
       "netlist": "",
       "plot": "gerber/",
       "specctra_dsn": "",
+      "step": "limit_sw_v2.step",
       "vrml": ""
     },
     "page_layout_descr_file": ""
