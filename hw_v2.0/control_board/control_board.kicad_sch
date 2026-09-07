@@ -6,7 +6,7 @@
 	(paper "A3")
 	(title_block
 		(title "SPINKOVACKA")
-		(rev "V1.0")
+		(rev "V2.0")
 		(company "MECASYS")
 	)
 	(lib_symbols
