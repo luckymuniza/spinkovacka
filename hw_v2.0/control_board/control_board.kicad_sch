@@ -16529,7 +16529,7 @@
 				)
 			)
 		)
-		(property "Value" "Micro_SD_Card"
+		(property "Value" "GCT_MEM2067-02-180-00-A_REVB"
 			(at 361.315 179.07 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -18307,7 +18307,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "ESP32-WROOM-32E"
+		(property "Value" "ESP32-WROOM-32E-N4"
 			(at 367.9033 81.28 0)
 			(show_name no)
 			(do_not_autoplace no)
