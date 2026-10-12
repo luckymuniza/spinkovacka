@@ -28,6 +28,10 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_vfs_fat.h"
+#include "sdmmc_cmd.h"
+#include "driver/sdspi_host.h"
+#include "driver/spi_common.h"
 
 /* ----------------------------- Piny ------------------------------------- */
 #define LED_BATT_GPIO           21       /*LED pin pre zobrazenie stavu baterie */
@@ -40,6 +44,11 @@
 #define BAT_VOLT_GPIO           33       /* ADC1_CH5 */
 #define LIMIT_SW_1_GPIO         35       //sw1 - spusta motor
 #define LIMIT_SW_2_GPIO         34       //sw2 - vypina motor
+//SD karta (SPI)
+#define SD_MOSI_GPIO            13
+#define SD_CLK_GPIO             14
+#define SD_CS_GPIO              15
+#define SD_MISO_GPIO            16
 
 //ADC pouzite kanaly
 #define IPROPI_ADC_CH      ADC_CHANNEL_4
@@ -89,6 +98,10 @@
 #define CHANGE_MODE_HOLD_US       6000000     /*[us] >6 s zmena WIFI/BT modu  */
 
 #define MOTOR_IDLE_TIMEOUT_US      (10 * 60 * 1000000ULL)   //[us] po 10min sa vypne spinkovacka automaticky
+
+#define SD_MOUNT_POINT            "/sdcard"
+#define SD_LOG_FILE               SD_MOUNT_POINT "/log.txt"
+#define SD_SPI_HOST               SPI2_HOST
 
 
 static const char *TAG = "Spinkovac";
@@ -442,6 +455,14 @@ static void power_off(void)
  * zapne, vypne LED
  */
 
+//knvertuje raw hodnotu spriemerovanu s ADC na [V] baterie, pouzije kalibracne hodnoty
+static float battery_raw_to_volt(uint16_t raw)
+{
+    int raw_mv = 0;
+    adc_cali_raw_to_voltage(s_bat_adc_cali, (int)raw, &raw_mv);
+    return ((float)raw_mv / 1000.0f) * BAT_VOLT_DIVIDER_RATIO;
+}
+
 static void battery_check_task(void *arg)
 {
 
@@ -449,10 +470,7 @@ static void battery_check_task(void *arg)
     static bool blink =false;
 
     for (;;) {
-        int raw_mv = 0;
-        //knvertuje raw hodnotu spriemerovanu s ADC na V, pouzije kalibracne hodnoty
-        adc_cali_raw_to_voltage(s_bat_adc_cali, (int)g_battery_volt_raw, &raw_mv);
-        float v = ((float)raw_mv / 1000.0f) * BAT_VOLT_DIVIDER_RATIO;
+        float v = battery_raw_to_volt(g_battery_volt_raw);
         g_bat_volt = v;
 
         ESP_LOGI(TAG, "Ubat = %.2f V (raw=%u)", v, (unsigned)g_battery_volt_raw);
@@ -486,6 +504,86 @@ static void battery_check_task(void *arg)
         //uloha sa opakuje kazdych BATTERY_CHECK_CYCLE_TIME_MS
         vTaskDelay(pdMS_TO_TICKS(BATTERY_CHECK_CYCLE_TIME_MS));
     }
+}
+
+
+
+
+
+/*
+ * ************************************************************************
+ * --------------------------- SD LOG TASK --------------------------------
+ * ************************************************************************
+ * jednorazovo po starte: pocka kym je zmerane napatie baterie (plny bufer),
+ * pripoji SD kartu (SPI), do log.txt prida riadok "<cislo_riadku> <Vbat>"
+ * a ten isty riadok vypise na stdout. Ak subor neexistuje, vytvori sa.
+ * Potom sa karta odpoji a task skonci.
+ */
+static void sd_log_task(void *arg)
+{
+    //caka kym sa naplni bufer VBAT (meaavg_get_sum vracia 0 kym nie je plny)
+    while (meaavg_get_sum(&s_battery_avg) == 0) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    float v = battery_raw_to_volt(g_battery_volt_raw);
+
+    spi_bus_config_t bus_cfg = {
+        .mosi_io_num     = SD_MOSI_GPIO,
+        .miso_io_num     = SD_MISO_GPIO,
+        .sclk_io_num     = SD_CLK_GPIO,
+        .quadwp_io_num   = -1,
+        .quadhd_io_num   = -1,
+        .max_transfer_sz = 4000,
+    };
+    esp_err_t ret = spi_bus_initialize(SD_SPI_HOST, &bus_cfg, SDSPI_DEFAULT_DMA);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SD: spi bus init zlyhal (%s)", esp_err_to_name(ret));
+        vTaskDelete(NULL);
+    }
+
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.slot = SD_SPI_HOST;
+    sdspi_device_config_t slot_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
+    slot_cfg.gpio_cs = SD_CS_GPIO;
+    slot_cfg.host_id = SD_SPI_HOST;
+
+    esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {
+        .format_if_mount_failed = false,
+        .max_files              = 2,
+        .allocation_unit_size   = 16 * 1024,
+    };
+    sdmmc_card_t *card = NULL;
+    ret = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &host, &slot_cfg, &mount_cfg, &card);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SD: mount zlyhal (%s)", esp_err_to_name(ret));
+        spi_bus_free(SD_SPI_HOST);
+        vTaskDelete(NULL);
+    }
+
+    //cislo riadku = pocet existujucich riadkov + 1
+    unsigned row = 1;
+    FILE *f = fopen(SD_LOG_FILE, "r");
+    if (f) {
+        int c;
+        while ((c = fgetc(f)) != EOF) {
+            if (c == '\n') row++;
+        }
+        fclose(f);
+    }
+
+    //"a" -> pripise na koniec, ak subor neexistuje vytvori ho
+    f = fopen(SD_LOG_FILE, "a");
+    if (f) {
+        fprintf(f, "%u %.2f\n", row, v);
+        fclose(f);
+    } else {
+        ESP_LOGE(TAG, "SD: nepodarilo sa otvorit %s", SD_LOG_FILE);
+    }
+    printf("%u %.2f\n", row, v);
+
+    esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT, card);
+    spi_bus_free(SD_SPI_HOST);
+    vTaskDelete(NULL);
 }
 
 
@@ -720,5 +818,6 @@ void app_main(void)
     xTaskCreate(motor_control_task, "control", 4096, NULL, 6, NULL);
     xTaskCreate(onoff_button_task,  "button",  4096, NULL, 5, NULL);
     xTaskCreate(battery_check_task,  "battery",  4096, NULL, 4, NULL);
+    xTaskCreate(sd_log_task,  "sd_log",  4096, NULL, 3, NULL);
     ESP_LOGI(TAG, "start");
 }

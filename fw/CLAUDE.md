@@ -15,7 +15,7 @@ idf.py -p <PORT> flash monitor
 Diagnostiky v IDE typu „include not found" pred prvým buildom sú len chýbajúce
 ESP-IDF cesty pre IntelliSense — po `idf.py build` (vygeneruje `build/compile_commands.json`) zmiznú.
 
-`main/CMakeLists.txt` → `REQUIRES esp_adc esp_timer esp_driver_gpio esp_driver_ledc`.
+`main/CMakeLists.txt` → `REQUIRES esp_adc esp_timer esp_driver_gpio esp_driver_ledc esp_driver_spi esp_driver_sdspi sdmmc fatfs`.
 
 ## Piny
 
@@ -31,6 +31,7 @@ ESP-IDF cesty pre IntelliSense — po `idf.py build` (vygeneruje `build/compile_
 | BAT_VOLT | 33 | ADC1_CH5 | napätie batérie; ADC atten 0 dB (ref 1.1 V) |
 | LIMIT_SW_1 | 35 | IN | 1 = aktívny; **spúšťa** motor |
 | LIMIT_SW_2 | 34 | IN | 1 = aktívny; **zastavuje** motor |
+| SD_MOSI / CLK / CS / MISO | 13 / 14 / 15 / 16 | SPI2 | SD karta (FAT), mount `/sdcard` |
 
 Pozn.: GPIO32–39 sú input-only bez interných pull rezistorov — LIMIT_SW_1/2 majú
 pull riešený externe (optická závora + Schmitt, čistý signál). Pozor: oproti staršej
@@ -88,6 +89,8 @@ vypnutie, >6 s návrat a zhasnutie LED_MODE). Debounce 50 ms pri vzorkovaní 10 
 - **onoff_button_task** (prio 5) — SWITCH, debounce, logika 3–6 s / >6 s,
   `power_off()`, mode + LED_MODE.
 - **battery_check_task** (prio 4) — meranie napätia, stav batérie a LED_BATT.
+- **sd_log_task** (prio 3, jednorazový) — po prvom platnom meraní Vbat pridá do
+  `/sdcard/log.txt` riadok `<číslo_riadku> <Vbat>` (aj na stdout), odpojí kartu a skončí.
 
 `esp_timer` sa používa pre 1 kHz vzorkovanie preto, že default FreeRTOS tick je 100 Hz
 (sub-10 ms `vTaskDelay` by nefungoval). Callback beží v esp_timer **tasku** (nie ISR),
